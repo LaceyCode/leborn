@@ -23,9 +23,11 @@ async function fetchNBAScores() {
 
 function formatScores(games) {
   if (!games.length) return 'No games today!';
-  return games.map(function(g) {
-  return g.home_team.full_name + ' ' + g.home_team_score + ' - ' + g.visitor_team_score + ' ' + g.visitor_team.full_name + ' (' + g.status + ')';
-  }).join('\n');
+  const divider = '\u2015\u2015\u2015\u2015\u2015\u2015\u2015\u2015\u2015\u2015\u2015\u2015\u2015\u2015\u2015\u2015\u2015\u2015\u2015\u2015';
+  const lines = games.map(function(g) {
+    return divider + '\n' + g.home_team.full_name + ' ' + g.home_team_score + ' - ' + g.visitor_team_score + ' ' + g.visitor_team.full_name + ' (' + g.status + ')';
+  });
+  return lines.join('\n') + '\n' + divider;
 }
 
 async function postScores() {
