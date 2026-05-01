@@ -1,4 +1,4 @@
-require('dotenv').config();
+	require('dotenv').config();
 
 const { Client, GatewayIntentBits } = require('discord.js');
 
@@ -24,7 +24,7 @@ async function fetchNBAScores() {
 function formatScores(games) {
   if (!games.length) return 'No games today!';
   return games.map(function(g) {
-    return g.home_team.abbreviation + ' ' + g.home_team_score + ' - ' + g.visitor_team_score + ' ' + g.visitor_team.abbreviation + ' (' + g.status + ')';
+  return g.home_team.full_name + ' ' + g.home_team_score + ' - ' + g.visitor_team_score + ' ' + g.visitor_team.full_name + ' (' + g.status + ')';
   }).join('\n');
 }
 
