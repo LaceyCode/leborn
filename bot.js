@@ -56,4 +56,10 @@ client.once('ready', function() {
   setInterval(postScores, CHECK_INTERVAL_MS);
 });
 
+const http = require('http');
+http.createServer(function(req, res) {
+  res.write('bot is alive');
+  res.end();
+}).listen(3000);
+
 client.login(process.env.BOT_TOKEN);
