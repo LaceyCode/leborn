@@ -1,4 +1,4 @@
-	require('dotenv').config();
+require('dotenv').config();
 
 const { Client, GatewayIntentBits } = require('discord.js');
 
@@ -11,14 +11,28 @@ const WELCOME_ID = '1499680849363206224';
 const ROLE_ID = '1499671850525917184';
 const CHECK_INTERVAL_MS = 5 * 60 * 1000;
 
-async function fetchNBAScores() {
-  const now = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
-  const today = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0');
-  const res = await fetch('https://api.balldontlie.io/v1/games?dates[]=' + today, {
+async function fetchGamesForDate(dateStr) {
+  const res = await fetch('https://api.balldontlie.io/v1/games?dates[]=' + dateStr, {
     headers: { 'Authorization': process.env.API_KEY }
   });
   const data = await res.json();
   return data.data || [];
+}
+
+async function fetchNBAScores() {
+  const now = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
+  const today = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0');
+
+  const yesterdayDate = new Date(now);
+  yesterdayDate.setDate(yesterdayDate.getDate() - 1);
+  const yesterday = yesterdayDate.getFullYear() + '-' + String(yesterdayDate.getMonth() + 1).padStart(2, '0') + '-' + String(yesterdayDate.getDate()).padStart(2, '0');
+
+  const todayGames = await fetchGamesForDate(today);
+  const yesterdayGames = await fetchGamesForDate(yesterday);
+
+  const lateGames = yesterdayGames.filter(function(g) { return g.status !== 'Final'; });
+
+  return lateGames.concat(todayGames);
 }
 
 function formatScores(games) {
