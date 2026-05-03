@@ -6,9 +6,9 @@ const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.GuildMembers]
 });
 
-const CHANNEL_ID = '1499649774192689242';
-const WELCOME_ID = '1499680849363206224';
-const ROLE_ID = '1499671850525917184';
+const CHANNEL_ID = '1500380642880258159';
+const WELCOME_ID = '1500381220964536351';
+const ROLE_ID = '1500380828226818148';
 const CHECK_INTERVAL_MS = 5 * 60 * 1000;
 
 async function fetchGamesForDate(dateStr) {
@@ -58,12 +58,12 @@ async function postScores() {
 
 client.on('guildMemberAdd', function(member) {
   const channel = client.channels.cache.get(WELCOME_ID);
-  channel.send('thanks for joining the leborn club, <@' + member.id + '>. please read the rules');
+  channel.send('thanks for joining icee pt2, <@' + member.id + '>. read the rules.');
 });
 
 client.on('guildMemberRemove', function(member) {
   const channel = client.channels.cache.get(WELCOME_ID);
-  channel.send('<@' + member.id + '> left the leborn club');
+  channel.send('<@' + member.id + '> left, just like my dad..');
 });
 
 client.once('ready', function() {
