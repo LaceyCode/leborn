@@ -63,7 +63,7 @@ client.on('guildMemberAdd', function(member) {
 
 client.on('guildMemberRemove', function(member) {
   const channel = client.channels.cache.get(WELCOME_ID);
-  channel.send('<@' + member.id + '> left, just like my dad..');
+  channel.send('<@' + member.id + '> left, just like my dad...');
 });
 
 client.once('ready', function() {
