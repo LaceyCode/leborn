@@ -205,4 +205,7 @@ client.once('ready', async () => {
 
 client.on('error', err => console.error('[Discord Error]', err));
 
+const http = require('http');
+http.createServer((req, res) => res.end('LeBotJames is alive')).listen(3000);
+
 client.login(DISCORD_TOKEN);
