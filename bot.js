@@ -7,9 +7,6 @@ const {
 const https = require('https');
 const fs    = require('fs');
 
-// ═══════════════════════════════════════════════════════════════
-//  CONFIG  (values come from your .env file)
-// ═══════════════════════════════════════════════════════════════
 const DISCORD_TOKEN      = process.env.DISCORD_TOKEN;
 const NBA_CHANNEL_ID     = process.env.NBA_CHANNEL_ID;
 const SCORES_ROLE_ID     = process.env.SCORES_ROLE_ID;
@@ -19,17 +16,9 @@ const UPDATE_INTERVAL    = 5 * 60_000;  // How often score updates post in threa
 const THREAD_CLOSE_DELAY = 30_000;      // Delay before thread closes after game ends (30s)
 const STATE_FILE         = './games.json'; // Remembers active games if the bot restarts
 
-// ═══════════════════════════════════════════════════════════════
-//  STARTUP VALIDATION
-// ═══════════════════════════════════════════════════════════════
 if (!DISCORD_TOKEN)  { console.error('❌ Missing DISCORD_TOKEN in .env');  process.exit(1); }
 if (!NBA_CHANNEL_ID) { console.error('❌ Missing NBA_CHANNEL_ID in .env'); process.exit(1); }
 
-// ═══════════════════════════════════════════════════════════════
-//  PERSISTENT STATE
-//  Map: gameId → { threadId, lastUpdateTime, title }
-//  Saved to disk so the bot picks back up after a restart.
-// ═══════════════════════════════════════════════════════════════
 let games = new Map();
 
 function loadState() {
@@ -53,9 +42,6 @@ function saveState() {
   }
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  ESPN SCOREBOARD  (free, no API key needed)
-// ═══════════════════════════════════════════════════════════════
 function fetchScoreboard() {
   return new Promise((resolve, reject) => {
     https.get(
@@ -91,35 +77,25 @@ function parseGame(ev) {
   };
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  DISCORD HELPER
-// ═══════════════════════════════════════════════════════════════
 async function getThread(channel, threadId) {
   try   { return await channel.threads.fetch(threadId); }
   catch { return null; }
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  GAME START
-//  → Posts in channel, creates a thread off that message
-// ═══════════════════════════════════════════════════════════════
 async function handleGameStart(channel, g) {
   console.log(`[+] Game starting: ${g.title}`);
 
   const roleTag = SCORES_ROLE_ID ? `<@&${SCORES_ROLE_ID}>` : '`@scores`';
 
-  // Announcement in the main channel
   const startMsg = await channel.send(
     `**${g.title}** is starting! ${roleTag}`
   );
 
-  // Thread spawned from the announcement message
   const thread = await startMsg.startThread({
     name: g.title,
     autoArchiveDuration: ThreadAutoArchiveDuration.OneDay,
   });
 
-  // Welcome message inside the thread
   await thread.send(
     `**${g.title}** — Live Game Thread!\n` +
     `Scores update here every 5 minutes!`
@@ -133,9 +109,6 @@ async function handleGameStart(channel, g) {
   saveState();
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  SCORE UPDATE  (only fires if 5 minutes have passed)
-// ═══════════════════════════════════════════════════════════════
 async function handleScoreUpdate(channel, g) {
   const data = games.get(g.id);
   if (!data) return;
@@ -155,11 +128,6 @@ async function handleScoreUpdate(channel, g) {
   saveState();
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  GAME END
-//  → Posts final score in thread + channel, pins channel msg,
-//    closes thread 30 seconds later
-// ═══════════════════════════════════════════════════════════════
 async function handleGameEnd(channel, g) {
   const data = games.get(g.id);
   if (!data) return;
@@ -183,11 +151,9 @@ async function handleGameEnd(channel, g) {
     console.warn('[!] Could not pin the final score message. Does the bot have Manage Messages?');
   }
 
-  // Remove from tracking RIGHT NOW so a duplicate 'post' event can't re-fire
   games.delete(g.id);
   saveState();
 
-  // Lock + archive thread after 30 seconds
   if (thread) {
     setTimeout(async () => {
       try {
@@ -201,11 +167,6 @@ async function handleGameEnd(channel, g) {
   }
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  MAIN POLL LOOP
-//  Runs every 60 seconds. Handles as many simultaneous games
-//  as are in the ESPN scoreboard at once.
-// ═══════════════════════════════════════════════════════════════
 async function tick() {
   const channel = client.channels.cache.get(NBA_CHANNEL_ID);
   if (!channel) {
@@ -228,9 +189,7 @@ async function tick() {
   }
 }
 
-// ═══════════════════════════════════════════════════════════════
 //  BOT INIT
-// ═══════════════════════════════════════════════════════════════
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages],
 });
