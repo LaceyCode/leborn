@@ -1,81 +1,249 @@
 require('dotenv').config();
+const {
+  Client,
+  GatewayIntentBits,
+  ThreadAutoArchiveDuration,
+} = require('discord.js');
+const https = require('https');
+const fs    = require('fs');
 
-const { Client, GatewayIntentBits } = require('discord.js');
+// ═══════════════════════════════════════════════════════════════
+//  CONFIG  (values come from your .env file)
+// ═══════════════════════════════════════════════════════════════
+const DISCORD_TOKEN      = process.env.DISCORD_TOKEN;
+const NBA_CHANNEL_ID     = process.env.NBA_CHANNEL_ID;
+const SCORES_ROLE_ID     = process.env.SCORES_ROLE_ID;
 
-const client = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.GuildMembers]
-});
+const POLL_INTERVAL      = 60_000;      // How often the bot checks for game events (60s)
+const UPDATE_INTERVAL    = 5 * 60_000;  // How often score updates post in threads (5 min)
+const THREAD_CLOSE_DELAY = 30_000;      // Delay before thread closes after game ends (30s)
+const STATE_FILE         = './games.json'; // Remembers active games if the bot restarts
 
-const CHANNEL_ID = '1500380642880258159';
-const WELCOME_ID = '1500381220964536351';
-const ROLE_ID = '1500380828226818148';
-const CHECK_INTERVAL_MS = 5 * 60 * 1000;
+// ═══════════════════════════════════════════════════════════════
+//  STARTUP VALIDATION
+// ═══════════════════════════════════════════════════════════════
+if (!DISCORD_TOKEN)  { console.error('❌ Missing DISCORD_TOKEN in .env');  process.exit(1); }
+if (!NBA_CHANNEL_ID) { console.error('❌ Missing NBA_CHANNEL_ID in .env'); process.exit(1); }
 
-async function fetchGamesForDate(dateStr) {
-  const res = await fetch('https://api.balldontlie.io/v1/games?dates[]=' + dateStr, {
-    headers: { 'Authorization': process.env.API_KEY }
-  });
-  const data = await res.json();
-  return data.data || [];
-}
+// ═══════════════════════════════════════════════════════════════
+//  PERSISTENT STATE
+//  Map: gameId → { threadId, lastUpdateTime, title }
+//  Saved to disk so the bot picks back up after a restart.
+// ═══════════════════════════════════════════════════════════════
+let games = new Map();
 
-async function fetchNBAScores() {
-  const now = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
-  const today = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0');
-
-  const yesterdayDate = new Date(now);
-  yesterdayDate.setDate(yesterdayDate.getDate() - 1);
-  const yesterday = yesterdayDate.getFullYear() + '-' + String(yesterdayDate.getMonth() + 1).padStart(2, '0') + '-' + String(yesterdayDate.getDate()).padStart(2, '0');
-
-  const todayGames = await fetchGamesForDate(today);
-  const yesterdayGames = await fetchGamesForDate(yesterday);
-
-  const lateGames = yesterdayGames.filter(function(g) { return g.status !== 'Final'; });
-
-  return lateGames.concat(todayGames);
-}
-
-function formatScores(games) {
-  if (!games.length) return 'No games today!';
-  const divider = '\u2015\u2015\u2015\u2015\u2015\u2015\u2015\u2015\u2015\u2015\u2015\u2015\u2015\u2015\u2015\u2015\u2015\u2015\u2015\u2015';
-  const lines = games.map(function(g) {
-    return divider + '\n' + g.home_team.full_name + ' ' + g.home_team_score + ' - ' + g.visitor_team_score + ' ' + g.visitor_team.full_name + ' (' + g.status + ')';
-  });
-  return lines.join('\n') + '\n' + divider;
-}
-
-async function postScores() {
-  const channel = await client.channels.fetch(CHANNEL_ID);
-  const games = await fetchNBAScores();
-  if (!games.length) return;
-  const liveGames = games.filter(function(g) { return g.status !== 'Final' && g.period > 0; });
-  if (liveGames.length === 0) {
-    channel.send(formatScores(games));
-  } else {
-    channel.send('<@&' + ROLE_ID + '>\n' + formatScores(games));
+function loadState() {
+  try {
+    if (fs.existsSync(STATE_FILE)) {
+      games = new Map(
+        Object.entries(JSON.parse(fs.readFileSync(STATE_FILE, 'utf8')))
+      );
+      console.log(`[State] Resumed ${games.size} active game(s) from disk.`);
+    }
+  } catch (e) {
+    console.error('[State] Could not load saved state:', e.message);
   }
 }
 
-client.on('guildMemberAdd', function(member) {
-  const channel = client.channels.cache.get(WELCOME_ID);
-  channel.send('thanks for joining icee pt2, <@' + member.id + '>. read the rules.');
+function saveState() {
+  try {
+    fs.writeFileSync(STATE_FILE, JSON.stringify(Object.fromEntries(games), null, 2));
+  } catch (e) {
+    console.error('[State] Could not save state:', e.message);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  ESPN SCOREBOARD  (free, no API key needed)
+// ═══════════════════════════════════════════════════════════════
+function fetchScoreboard() {
+  return new Promise((resolve, reject) => {
+    https.get(
+      'https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard',
+      (res) => {
+        let body = '';
+        res.on('data', chunk => body += chunk);
+        res.on('end', () => {
+          try   { resolve(JSON.parse(body).events ?? []); }
+          catch (e) { reject(new Error('Failed to parse ESPN response: ' + e.message)); }
+        });
+      }
+    ).on('error', reject);
+  });
+}
+
+function parseGame(ev) {
+  const comp  = ev.competitions[0];
+  const away  = comp.competitors.find(c => c.homeAway === 'away');
+  const home  = comp.competitors.find(c => c.homeAway === 'home');
+  const p     = ev.status.period;
+
+  return {
+    id:          ev.id,
+    state:       ev.status.type.state,   // 'pre' | 'in' | 'post'
+    awayName:    away.team.displayName,
+    homeName:    home.team.displayName,
+    awayScore:   away.score  ?? '0',
+    homeScore:   home.score  ?? '0',
+    periodLabel: p <= 4 ? `Q${p}` : `OT${p - 4}`,
+    clock:       ev.status.displayClock,
+    title:       `${away.team.displayName} vs ${home.team.displayName}`,
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  DISCORD HELPER
+// ═══════════════════════════════════════════════════════════════
+async function getThread(channel, threadId) {
+  try   { return await channel.threads.fetch(threadId); }
+  catch { return null; }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  GAME START
+//  → Posts in channel, creates a thread off that message
+// ═══════════════════════════════════════════════════════════════
+async function handleGameStart(channel, g) {
+  console.log(`[+] Game starting: ${g.title}`);
+
+  const roleTag = SCORES_ROLE_ID ? `<@&${SCORES_ROLE_ID}>` : '`@scores`';
+
+  // Announcement in the main channel
+  const startMsg = await channel.send(
+    `**${g.title}** is starting! ${roleTag}`
+  );
+
+  // Thread spawned from the announcement message
+  const thread = await startMsg.startThread({
+    name: g.title,
+    autoArchiveDuration: ThreadAutoArchiveDuration.OneDay,
+  });
+
+  // Welcome message inside the thread
+  await thread.send(
+    `**${g.title}** — Live Game Thread!\n` +
+    `Scores update here every 5 minutes!`
+  );
+
+  games.set(g.id, {
+    threadId:       thread.id,
+    lastUpdateTime: 0,
+    title:          g.title,
+  });
+  saveState();
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  SCORE UPDATE  (only fires if 5 minutes have passed)
+// ═══════════════════════════════════════════════════════════════
+async function handleScoreUpdate(channel, g) {
+  const data = games.get(g.id);
+  if (!data) return;
+
+  // Not 5 minutes yet — skip
+  if (Date.now() - data.lastUpdateTime < UPDATE_INTERVAL) return;
+
+  const thread = await getThread(channel, data.threadId);
+  if (!thread) return;
+
+  await thread.send(
+    `**Score Update** | ${g.periodLabel} · ${g.clock}\n` +
+    `${g.awayName}: **${g.awayScore}** — ${g.homeName}: **${g.homeScore}**`
+  );
+
+  data.lastUpdateTime = Date.now();
+  saveState();
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  GAME END
+//  → Posts final score in thread + channel, pins channel msg,
+//    closes thread 30 seconds later
+// ═══════════════════════════════════════════════════════════════
+async function handleGameEnd(channel, g) {
+  const data = games.get(g.id);
+  if (!data) return;
+  console.log(`[✓] Game ended: ${g.title}`);
+
+  const finalText =
+    `The game has ended! These are the final scores:\n` +
+    `**${g.awayName}: ${g.awayScore} — ${g.homeName}: ${g.homeScore}**`;
+
+  // Post in thread
+  const thread = await getThread(channel, data.threadId);
+  if (thread) await thread.send(finalText);
+
+  // Post in channel
+  const channelMsg = await channel.send(finalText);
+
+  // Pin the channel message
+  try {
+    await channelMsg.pin();
+  } catch {
+    console.warn('[!] Could not pin the final score message. Does the bot have Manage Messages?');
+  }
+
+  // Remove from tracking RIGHT NOW so a duplicate 'post' event can't re-fire
+  games.delete(g.id);
+  saveState();
+
+  // Lock + archive thread after 30 seconds
+  if (thread) {
+    setTimeout(async () => {
+      try {
+        await thread.setLocked(true);
+        await thread.setArchived(true);
+        console.log(`[~] Thread closed: ${g.title}`);
+      } catch (e) {
+        console.error('[!] Failed to close thread:', e.message);
+      }
+    }, THREAD_CLOSE_DELAY);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  MAIN POLL LOOP
+//  Runs every 60 seconds. Handles as many simultaneous games
+//  as are in the ESPN scoreboard at once.
+// ═══════════════════════════════════════════════════════════════
+async function tick() {
+  const channel = client.channels.cache.get(NBA_CHANNEL_ID);
+  if (!channel) {
+    console.error('[!] NBA channel not found. Double-check NBA_CHANNEL_ID in .env');
+    return;
+  }
+
+  let events;
+  try   { events = await fetchScoreboard(); }
+  catch (e) { console.error('[!] ESPN fetch failed:', e.message); return; }
+
+  for (const ev of events) {
+    const g       = parseGame(ev);
+    const tracked = games.has(g.id);
+
+    if      (g.state === 'in'   && !tracked) await handleGameStart(channel, g);
+    else if (g.state === 'in'   &&  tracked) await handleScoreUpdate(channel, g);
+    else if (g.state === 'post' &&  tracked) await handleGameEnd(channel, g);
+    // 'pre' state (game not started) is intentionally ignored
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  BOT INIT
+// ═══════════════════════════════════════════════════════════════
+const client = new Client({
+  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages],
 });
 
-client.on('guildMemberRemove', function(member) {
-  const channel = client.channels.cache.get(WELCOME_ID);
-  channel.send('<@' + member.id + '> left, just like my dad...');
+client.once('ready', async () => {
+  console.log(`\n👑 LeBotJames is LIVE — logged in as ${client.user.tag}`);
+  console.log(`   Watching channel ID: ${NBA_CHANNEL_ID}`);
+  console.log(`   Polling every ${POLL_INTERVAL / 1000}s | Thread updates every ${UPDATE_INTERVAL / 1000 / 60} min\n`);
+  loadState();
+  await tick();                          // Run immediately on startup
+  setInterval(tick, POLL_INTERVAL);     // Then every 60 seconds
 });
 
-client.once('ready', function() {
-  console.log('Logged in as ' + client.user.tag);
-  postScores();
-  setInterval(postScores, CHECK_INTERVAL_MS);
-});
+client.on('error', err => console.error('[Discord Error]', err));
 
-const http = require('http');
-http.createServer(function(req, res) {
-  res.write('bot is alive');
-  res.end();
-}).listen(3000);
-
-client.login(process.env.BOT_TOKEN);
+client.login(DISCORD_TOKEN);

@@ -1,16 +1,16 @@
 {
-  "name": "leborn",
+  "name": "lebotjames",
   "version": "1.0.0",
-  "description": "",
-  "main": "bot.js",
+  "description": "👑 LeBron-themed Discord bot for live NBA score tracking",
+  "main": "index.js",
   "scripts": {
-    "start": "node bot.js"
+    "start": "node index.js"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "engines": {
+    "node": ">=16.11.0"
+  },
   "dependencies": {
-    "discord.js": "^14.26.3",
-    "dotenv": "^17.4.2"
+    "discord.js": "^14.15.3",
+    "dotenv": "^16.4.5"
   }
 }
