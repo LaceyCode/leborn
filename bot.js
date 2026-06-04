@@ -12,7 +12,7 @@ const NBA_CHANNEL_ID     = process.env.NBA_CHANNEL_ID;
 const SCORES_ROLE_ID     = process.env.SCORES_ROLE_ID;
 
 const POLL_INTERVAL      = 60_000;      // How often the bot checks for game events (60s)
-const UPDATE_INTERVAL    = 5 * 60_000;  // How often score updates post in threads (5 min)
+const UPDATE_INTERVAL    = 60_000;  // How often score updates post in threads (5 min)
 const THREAD_CLOSE_DELAY = 30_000;      // Delay before thread closes after game ends (30s)
 const STATE_FILE         = './games.json'; // Remembers active games if the bot restarts
 
