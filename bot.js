@@ -98,7 +98,7 @@ async function handleGameStart(channel, g) {
 
   await thread.send(
     `**${g.title}** — Live Game Thread!\n` +
-    `Scores update here every 5 minutes!`
+    `Scores update here every minute!`
   );
 
   games.set(g.id, {
